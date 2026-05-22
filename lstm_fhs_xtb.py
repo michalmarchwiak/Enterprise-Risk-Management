@@ -418,147 +418,183 @@ RESID_WIN_GRID = [
     (500,  1500),
 ]
 
-n_lstm_runs = len(WINDOW_GRID) * len(LAMBDA_EWMA_GRID)
-print('\n====== Grid search FHS: WINDOW x LAMBDA_EWMA x SIGMA_FLOOR x RESID_WIN ======')
-print(f'(LSTM trenowany dla kazdej pary (WINDOW, LAMBDA_EWMA) — {n_lstm_runs} razy. '
-      f'SIGMA_FLOOR i RESID_WIN aplikowane post-hoc.)\n')
-
-
 def _fmt_rw(w):
     return 'all' if w is None else str(w)
 
 
-grid_rows = []
-for win in WINDOW_GRID:
-    for lam in LAMBDA_EWMA_GRID:
-        pipe = get_pipeline(win, lam, verbose=True)
-        n_obs = len(pipe['r_actual'])
-        exp95 = int(round(0.05 * n_obs))
-        exp99 = int(round(0.01 * n_obs))
-        print(f'  N test = {n_obs}, oczekiwane przekroczenia: 95%={exp95}, 99%={exp99}')
-        for sf in SIGMA_FLOOR_GRID:
-            for rw95, rw99 in RESID_WIN_GRID:
-                rw_dict = {0.05: rw95, 0.01: rw99}
-                res = compute_var_and_tests(pipe, sf, resid_win=rw_dict)
-                t95 = res['tests'][0.05]
-                t99 = res['tests'][0.01]
-                fr95 = t95['freq']
-                fr99 = t99['freq']
-                freq_dev = abs(fr95 - 0.05) / 0.05 + abs(fr99 - 0.01) / 0.01
-                q95_arr = res['q_per_refit'][0.05]
-                q99_arr = res['q_per_refit'][0.01]
-                grid_rows.append({
-                    'WIN':     win,
-                    'LAMBDA':  lam,
-                    'SIG_FLR': sf,
-                    'RW95':    _fmt_rw(rw95),
-                    'RW99':    _fmt_rw(rw99),
-                    'q95_avg': f'{q95_arr.mean():.3f}',
-                    'q99_avg': f'{q99_arr.mean():.3f}',
-                    'n95':     t95['n_viol'],
-                    'fr95':    f'{fr95:.2%}',
-                    'Kup95':   f'{t95["p_kup"]:.3f}' if not np.isnan(t95['p_kup']) else '-',
-                    'Chr95':   f'{t95["p_chr"]:.3f}' if not np.isnan(t95['p_chr']) else '-',
-                    'OK95':    'TAK' if (t95['k_ok'] and t95['c_ok']) else 'NIE',
-                    'n99':     t99['n_viol'],
-                    'fr99':    f'{fr99:.2%}',
-                    'Kup99':   f'{t99["p_kup"]:.3f}' if not np.isnan(t99['p_kup']) else '-',
-                    'Chr99':   f'{t99["p_chr"]:.3f}' if not np.isnan(t99['p_chr']) else '-',
-                    'OK99':    'TAK' if (t99['k_ok'] and t99['c_ok']) else 'NIE',
-                    'freq_dev': f'{freq_dev:.3f}',
-                    '_score':  (
-                        (0.0 if np.isnan(t95['p_kup']) else min(t95['p_kup'], 1.0))
-                        + (0.0 if np.isnan(t99['p_kup']) else min(t99['p_kup'], 1.0))
-                        + (0.0 if np.isnan(t95['p_chr']) else min(t95['p_chr'], 1.0))
-                        + (0.0 if np.isnan(t99['p_chr']) else min(t99['p_chr'], 1.0))
-                    ),
-                    '_freq_dev': freq_dev,
-                    '_rw95':   rw95,
-                    '_rw99':   rw99,
-                })
-
-df_grid = pd.DataFrame(grid_rows)
-_aux_cols = ['_score', '_freq_dev', '_rw95', '_rw99']
-
-df_show = df_grid.sort_values('_score', ascending=False).drop(columns=_aux_cols)
-print('\n--- Pelna tabela (sortowana wg sumy p-wartosci, malejaco) — top 30 ---')
-print(df_show.head(30).to_string(index=False))
-
-df_pass = df_show[(df_show['OK95'] == 'TAK') & (df_show['OK99'] == 'TAK')]
-print('\n--- Tylko konfiguracje OK95 = TAK i OK99 = TAK ---')
-if len(df_pass) == 0:
-    print('  (brak konfiguracji przechodzacej oba testy na obu poziomach)')
-else:
-    print(df_pass.to_string(index=False))
-
-df_freq = df_grid.sort_values('_freq_dev', ascending=True).drop(columns=_aux_cols).head(10)
-print('\n--- Top 10 po freq_dev (najmniejsze odchylenie od 5%/1%) ---')
-print(df_freq.to_string(index=False))
-
-# Najlepsza konfiguracja: priorytet — przechodzenie obu testow na obu poziomach
-# (OK95 i OK99 = TAK), nastepnie score po p-wartosciach, tie-break po freq_dev.
-# Bez priorytetu OK byloby ryzyko, ze model z marginalnym Kupcem dla 95% wygra.
-df_grid['_pass_both'] = ((df_grid['OK95'] == 'TAK') & (df_grid['OK99'] == 'TAK')).astype(int)
-best = df_grid.sort_values(['_pass_both', '_score', '_freq_dev'],
-                           ascending=[False, False, True]).iloc[0]
 def _to_rw(v):
-    # pandas zamienia None w kolumnie mieszanej int/None na NaN
     return None if v is None or pd.isna(v) else int(v)
 
-BEST_WIN  = int(best['WIN'])
-BEST_LAM  = float(best['LAMBDA'])
-BEST_SF   = float(best['SIG_FLR'])
-BEST_RW95 = _to_rw(best['_rw95'])
-BEST_RW99 = _to_rw(best['_rw99'])
-BEST_RW   = {0.05: BEST_RW95, 0.01: BEST_RW99}
-print(f'\nNajlepsza konfiguracja (pass_both={int(best["_pass_both"])}, '
-      f'score = {best["_score"]:.3f}, freq_dev = {best["_freq_dev"]:.3f}): '
-      f'WINDOW={BEST_WIN}, LAMBDA_EWMA={BEST_LAM}, SIGMA_FLOOR={BEST_SF}, '
-      f'RW95={_fmt_rw(BEST_RW95)}, RW99={_fmt_rw(BEST_RW99)}')
 
-best_pipe       = get_pipeline(BEST_WIN, BEST_LAM)
-best_res        = compute_var_and_tests(best_pipe, BEST_SF, resid_win=BEST_RW)
-sigma_pred      = best_res['sigma']
-vars_pred       = best_res['vars']
-dates_te        = best_pipe['dates_te']
-r_actual        = best_pipe['r_actual']
-ewma_te         = best_pipe['ewma_te']
-sigma_pred_raw  = best_pipe['sigma_pred_raw']
-df_best         = best_pipe['df']
-n_train         = best_pipe['n_train']
-train_losses    = best_pipe['train_losses']
-val_losses      = best_pipe['val_losses']
+def run_grid_search(verbose_pipeline=True, verbose_grid=True):
+    """Pelny grid search + wybor najlepszej konfiguracji (jak przy uruchomieniu skryptu)."""
+    n_lstm_runs = len(WINDOW_GRID) * len(LAMBDA_EWMA_GRID)
+    if verbose_grid:
+        print('\n====== Grid search FHS: WINDOW x LAMBDA_EWMA x SIGMA_FLOOR x RESID_WIN ======')
+        print(f'(LSTM trenowany dla kazdej pary (WINDOW, LAMBDA_EWMA) — {n_lstm_runs} razy. '
+              f'SIGMA_FLOOR i RESID_WIN aplikowane post-hoc.)\n')
 
-# ------------------- 9. Wykresy -------------------
-fig, axes = plt.subplots(3, 1, figsize=(14, 11), sharex=False)
+    grid_rows = []
+    for win in WINDOW_GRID:
+        for lam in LAMBDA_EWMA_GRID:
+            pipe = get_pipeline(win, lam, verbose=verbose_pipeline)
+            n_obs = len(pipe['r_actual'])
+            exp95 = int(round(0.05 * n_obs))
+            exp99 = int(round(0.01 * n_obs))
+            if verbose_grid:
+                print(f'  N test = {n_obs}, oczekiwane przekroczenia: 95%={exp95}, 99%={exp99}')
+            for sf in SIGMA_FLOOR_GRID:
+                for rw95, rw99 in RESID_WIN_GRID:
+                    rw_dict = {0.05: rw95, 0.01: rw99}
+                    res = compute_var_and_tests(pipe, sf, resid_win=rw_dict)
+                    t95 = res['tests'][0.05]
+                    t99 = res['tests'][0.01]
+                    fr95 = t95['freq']
+                    fr99 = t99['freq']
+                    freq_dev = abs(fr95 - 0.05) / 0.05 + abs(fr99 - 0.01) / 0.01
+                    q95_arr = res['q_per_refit'][0.05]
+                    q99_arr = res['q_per_refit'][0.01]
+                    grid_rows.append({
+                        'WIN':     win,
+                        'LAMBDA':  lam,
+                        'SIG_FLR': sf,
+                        'RW95':    _fmt_rw(rw95),
+                        'RW99':    _fmt_rw(rw99),
+                        'q95_avg': f'{q95_arr.mean():.3f}',
+                        'q99_avg': f'{q99_arr.mean():.3f}',
+                        'n95':     t95['n_viol'],
+                        'fr95':    f'{fr95:.2%}',
+                        'Kup95':   f'{t95["p_kup"]:.3f}' if not np.isnan(t95['p_kup']) else '-',
+                        'Chr95':   f'{t95["p_chr"]:.3f}' if not np.isnan(t95['p_chr']) else '-',
+                        'OK95':    'TAK' if (t95['k_ok'] and t95['c_ok']) else 'NIE',
+                        'n99':     t99['n_viol'],
+                        'fr99':    f'{fr99:.2%}',
+                        'Kup99':   f'{t99["p_kup"]:.3f}' if not np.isnan(t99['p_kup']) else '-',
+                        'Chr99':   f'{t99["p_chr"]:.3f}' if not np.isnan(t99['p_chr']) else '-',
+                        'OK99':    'TAK' if (t99['k_ok'] and t99['c_ok']) else 'NIE',
+                        'freq_dev': f'{freq_dev:.3f}',
+                        '_score':  (
+                            (0.0 if np.isnan(t95['p_kup']) else min(t95['p_kup'], 1.0))
+                            + (0.0 if np.isnan(t99['p_kup']) else min(t99['p_kup'], 1.0))
+                            + (0.0 if np.isnan(t95['p_chr']) else min(t95['p_chr'], 1.0))
+                            + (0.0 if np.isnan(t99['p_chr']) else min(t99['p_chr'], 1.0))
+                        ),
+                        '_freq_dev': freq_dev,
+                        '_rw95':   rw95,
+                        '_rw99':   rw99,
+                    })
 
-axes[0].plot(train_losses, label='train MAE')
-axes[0].plot(val_losses,   label='val MAE')
-axes[0].set_title(f'Krzywa uczenia (MAE) — WIN={BEST_WIN}, LAMBDA={BEST_LAM}')
-axes[0].legend(); axes[0].grid(alpha=0.3)
+    df_grid = pd.DataFrame(grid_rows)
+    _aux_cols = ['_score', '_freq_dev', '_rw95', '_rw99']
 
-axes[1].plot(dates_te, sigma_pred,     color='steelblue', lw=1,
-             label=f'sigma LSTM (floor={BEST_SF})')
-axes[1].plot(dates_te, sigma_pred_raw, color='steelblue', lw=0.6, alpha=0.4,
-             label='sigma LSTM (raw)')
-axes[1].plot(dates_te, ewma_te,        color='gray', lw=0.8, alpha=0.7,
-             label=f'EWMA sigma (lambda={BEST_LAM})')
-for k in range(n_train + REFIT_STEP, len(df_best), REFIT_STEP):
-    axes[1].axvline(df_best.index[k], color='black', ls=':', lw=0.5, alpha=0.4)
-axes[1].set_title('Prognoza zmiennosci $\\sigma_{t+1}$ (rolling refit)')
-axes[1].legend(); axes[1].grid(alpha=0.3)
+    df_show = df_grid.sort_values('_score', ascending=False).drop(columns=_aux_cols)
+    if verbose_grid:
+        print('\n--- Pelna tabela (sortowana wg sumy p-wartosci, malejaco) — top 30 ---')
+        print(df_show.head(30).to_string(index=False))
 
-axes[2].plot(dates_te, r_actual, color='steelblue', lw=0.5, alpha=0.7, label='$R_t$')
-for a, c in zip(ALPHAS, ['orange', 'red']):
-    var_a = vars_pred[a]
-    viol  = r_actual < -var_a
-    axes[2].plot(dates_te, -var_a, color=c, lw=1, label=f'-VaR {int((1-a)*100)}% (FHS)')
-    axes[2].scatter(dates_te[viol], r_actual[viol], color=c, s=18, zorder=5)
-axes[2].set_title(f'LSTM-FHS VaR best config '
-                  f'(WIN={BEST_WIN}, LAM={BEST_LAM}, SF={BEST_SF}, '
-                  f'RW95={_fmt_rw(BEST_RW95)}, RW99={_fmt_rw(BEST_RW99)}) vs zwroty')
-axes[2].legend(); axes[2].grid(alpha=0.3)
+    df_pass = df_show[(df_show['OK95'] == 'TAK') & (df_show['OK99'] == 'TAK')]
+    if verbose_grid:
+        print('\n--- Tylko konfiguracje OK95 = TAK i OK99 = TAK ---')
+        if len(df_pass) == 0:
+            print('  (brak konfiguracji przechodzacej oba testy na obu poziomach)')
+        else:
+            print(df_pass.to_string(index=False))
 
-plt.tight_layout()
-print('\nWykres gotowy.')
-plt.show()
+    df_freq = df_grid.sort_values('_freq_dev', ascending=True).drop(columns=_aux_cols).head(10)
+    if verbose_grid:
+        print('\n--- Top 10 po freq_dev (najmniejsze odchylenie od 5%/1%) ---')
+        print(df_freq.to_string(index=False))
+
+    df_grid['_pass_both'] = ((df_grid['OK95'] == 'TAK') & (df_grid['OK99'] == 'TAK')).astype(int)
+    best = df_grid.sort_values(['_pass_both', '_score', '_freq_dev'],
+                               ascending=[False, False, True]).iloc[0]
+
+    best_win  = int(best['WIN'])
+    best_lam  = float(best['LAMBDA'])
+    best_sf   = float(best['SIG_FLR'])
+    best_rw95 = _to_rw(best['_rw95'])
+    best_rw99 = _to_rw(best['_rw99'])
+    best_rw   = {0.05: best_rw95, 0.01: best_rw99}
+    if verbose_grid:
+        print(f'\nNajlepsza konfiguracja (pass_both={int(best["_pass_both"])}, '
+              f'score = {best["_score"]:.3f}, freq_dev = {best["_freq_dev"]:.3f}): '
+              f'WINDOW={best_win}, LAMBDA_EWMA={best_lam}, SIGMA_FLOOR={best_sf}, '
+              f'RW95={_fmt_rw(best_rw95)}, RW99={_fmt_rw(best_rw99)}')
+
+    best_pipe = get_pipeline(best_win, best_lam)
+    best_res  = compute_var_and_tests(best_pipe, best_sf, resid_win=best_rw)
+
+    return {
+        'df_grid':        df_grid,
+        'df_show':        df_show,
+        'df_pass':        df_pass,
+        'df_freq':        df_freq,
+        'best_row':       best,
+        'best_win':       best_win,
+        'best_lam':       best_lam,
+        'best_sf':        best_sf,
+        'best_rw95':      best_rw95,
+        'best_rw99':      best_rw99,
+        'best_rw':        best_rw,
+        'best_pipe':      best_pipe,
+        'best_res':       best_res,
+        'sigma_pred':     best_res['sigma'],
+        'vars_pred':      best_res['vars'],
+        'dates_te':       best_pipe['dates_te'],
+        'r_actual':       best_pipe['r_actual'],
+        'ewma_te':        best_pipe['ewma_te'],
+        'sigma_pred_raw': best_pipe['sigma_pred_raw'],
+        'df_best':        best_pipe['df'],
+        'n_train':        best_pipe['n_train'],
+        'train_losses':   best_pipe['train_losses'],
+        'val_losses':     best_pipe['val_losses'],
+    }
+
+
+if __name__ == '__main__':
+    out = run_grid_search()
+    BEST_WIN, BEST_LAM, BEST_SF = out['best_win'], out['best_lam'], out['best_sf']
+    BEST_RW95, BEST_RW99 = out['best_rw95'], out['best_rw99']
+    dates_te = out['dates_te']
+    sigma_pred = out['sigma_pred']
+    sigma_pred_raw = out['sigma_pred_raw']
+    ewma_te = out['ewma_te']
+    r_actual = out['r_actual']
+    vars_pred = out['vars_pred']
+    df_best = out['df_best']
+    n_train = out['n_train']
+    train_losses = out['train_losses']
+    val_losses = out['val_losses']
+
+    fig, axes = plt.subplots(3, 1, figsize=(14, 11), sharex=False)
+
+    axes[0].plot(train_losses, label='train MAE')
+    axes[0].plot(val_losses,   label='val MAE')
+    axes[0].set_title(f'Krzywa uczenia (MAE) — WIN={BEST_WIN}, LAMBDA={BEST_LAM}')
+    axes[0].legend(); axes[0].grid(alpha=0.3)
+
+    axes[1].plot(dates_te, sigma_pred,     color='steelblue', lw=1,
+                 label=f'sigma LSTM (floor={BEST_SF})')
+    axes[1].plot(dates_te, sigma_pred_raw, color='steelblue', lw=0.6, alpha=0.4,
+                 label='sigma LSTM (raw)')
+    axes[1].plot(dates_te, ewma_te,        color='gray', lw=0.8, alpha=0.7,
+                 label=f'EWMA sigma (lambda={BEST_LAM})')
+    for k in range(n_train + REFIT_STEP, len(df_best), REFIT_STEP):
+        axes[1].axvline(df_best.index[k], color='black', ls=':', lw=0.5, alpha=0.4)
+    axes[1].set_title('Prognoza zmiennosci $\\sigma_{t+1}$ (rolling refit)')
+    axes[1].legend(); axes[1].grid(alpha=0.3)
+
+    axes[2].plot(dates_te, r_actual, color='steelblue', lw=0.5, alpha=0.7, label='$R_t$')
+    for a, c in zip(ALPHAS, ['orange', 'red']):
+        var_a = vars_pred[a]
+        viol  = r_actual < -var_a
+        axes[2].plot(dates_te, -var_a, color=c, lw=1, label=f'-VaR {int((1-a)*100)}% (FHS)')
+        axes[2].scatter(dates_te[viol], r_actual[viol], color=c, s=18, zorder=5)
+    axes[2].set_title(f'LSTM-FHS VaR best config '
+                      f'(WIN={BEST_WIN}, LAM={BEST_LAM}, SF={BEST_SF}, '
+                      f'RW95={_fmt_rw(BEST_RW95)}, RW99={_fmt_rw(BEST_RW99)}) vs zwroty')
+    axes[2].legend(); axes[2].grid(alpha=0.3)
+
+    plt.tight_layout()
+    print('\nWykres gotowy.')
+    plt.show()
