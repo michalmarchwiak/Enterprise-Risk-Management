@@ -1,0 +1,29 @@
+# Analiza ryzyka XTB — ZRWP
+# Python 3.10+
+
+# Obliczenia i dane
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+scikit-learn>=1.3
+
+# Dane rynkowe
+yfinance>=0.2.40
+
+# Wizualizacja
+matplotlib>=3.7
+
+# Modele GARCH i szeregi czasowe
+arch>=6.0
+statsmodels>=0.14
+
+# Deep learning (LSTM)
+torch>=2.0
+
+# Notebooki
+jupyter>=1.0
+ipykernel>=6.0
+ipython>=8.0
+
+# Opcjonalnie (basf.ipynb — ceny metali)
+requests>=2.28
