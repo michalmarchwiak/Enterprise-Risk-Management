@@ -200,11 +200,6 @@ Główny zbiór analityczny: **n = 2030** obserwacji dziennych log-zwrotów XTB.
 | `raport_prez4.pdf` | Raport z projektu VaR/EVaR |
 | `figures_raport/fig_01.png` – `fig_09.png` | Wykresy do raportu (charakterystyka, K-S, VaR, backtest, EVT, LSTM, Markowitz) |
 
-Kompilacja raportu LaTeX (opcjonalnie):
-
-```bash
-pdflatex raport_podsumowanie.tex
-```
 
 ---
 
