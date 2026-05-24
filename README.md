@@ -211,7 +211,7 @@ pdflatex raport_podsumowanie.tex
 ## Autor
 
 **Michał Marchwiak**  
-Semestr letni 2025/2026 — Zarządzanie Ryzykiem w Przedsiębiorstwie
+Semestr letni 2025/2026 — Zarządzanie Ryzykiem w Przemysle
 
 ---
 
