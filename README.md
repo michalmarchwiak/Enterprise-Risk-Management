@@ -185,7 +185,7 @@ python lstm_var_xtb.py    # wariant z t-Studentem
 | Źródło | Zawartość | Okres |
 |--------|-----------|-------|
 | Yahoo Finance (`yfinance`) | XTB.WA, akcje GPW, kursy FX, indeksy | 2018–2025 |
-| `wig20_d.csv` (lokalny) | Dzienne OHLCV WIG20 | 2021–2025 |
+| `wig20_d.csv` (stooq.pl) | Dzienne OHLCV WIG20 | 2021–2025 |
 
 Główny zbiór analityczny: **n = 2030** obserwacji dziennych log-zwrotów XTB.WA (2018-01-01 – 2025-12-30).
 
