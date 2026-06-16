@@ -2,7 +2,7 @@
 
 Projekt z przedmiotu **Zarządzanie Ryzykiem w Przedsiębiorstwie** — kompleksowa analiza ryzyka spółki **XTB S.A.** (`XTB.WA`) notowanej na GPW w okresie **2018–2025**.
 
-Repozytorium obejmuje cztery etapy pracy projektowej (notebooki `prez3`–`prez5`), hybrydowe modele **LSTM + VaR/FHS**, optymalizację portfela akcji GPW oraz podsumowanie wyników w formie notebooka i raportu PDF.
+Repozytorium obejmuje pięć etapów pracy projektowej (notebooki `prez3`–`prez6`), hybrydowy model **LSTM + FHS**, optymalizację portfela akcji GPW, strategię zabezpieczenia ryzyka walutowego oraz podsumowanie wyników w `podsumowanie.ipynb`.
 
 ---
 
@@ -15,7 +15,6 @@ Repozytorium obejmuje cztery etapy pracy projektowej (notebooki `prez3`–`prez5
 - [Wymagania](#wymagania)
 - [Instalacja i uruchomienie](#instalacja-i-uruchomienie)
 - [Dane](#dane)
-- [Raporty i wykresy](#raporty-i-wykresy)
 - [Autor](#autor)
 
 ---
@@ -31,6 +30,7 @@ Celem projektu jest:
 3. Modelowanie ekstremów (**EVT**: GEV, GPD).
 4. Optymalizacja portfela akcji GPW (**Markowitz**, model jednoskładnikowy).
 5. Hybrydowy model **LSTM + Filtered Historical Simulation (FHS)** prognozujący dynamiczny VaR.
+6. Zabezpieczenie ekspozycji walutowej **EUR/PLN** i **USD/PLN** kontraktami terminowymi **FEUR** i **FUSD** na GPW.
 
 ---
 
@@ -44,6 +44,7 @@ Celem projektu jest:
 | EVT | GPD (POT) lepiej estymuje skrajne kwantyle (99,9%) niż Block Maxima (GEV) |
 | LSTM-FHS | Najlepsza kalibracja w testach Kupieca/Christoffersena (p ≈ 1,0 na poziomach 95% i 99%) |
 | Portfel GPW | MVP (Sharpe ≈ 0,79) vs. portfel rynkowy (Sharpe ≈ 1,26); dywersyfikacja 13 spółek >> portfel 2-składnikowy |
+| Hedging FX | Kontrakty GPW redukują VaR 99% (1 dzień) z ~4,0 mln PLN do ~0,014 mln PLN; CFD na platformie XTB **nie stanowi hedżu** (net zero w grupie) |
 
 **Rekomendowany stack ryzyka dla XTB:**
 
@@ -51,26 +52,24 @@ Celem projektu jest:
 - Wymóg kapitałowy (IMA) → **LSTM-FHS** / **EWMA + Hill**
 - Stress test (Filar II) → **GPD / POT**
 - Alokacja strategiczna → **Markowitz + SIM**
+- Ekspozycja walutowa → **FEUR / FUSD na GPW** (KDPW, fixing NBP)
 
 ---
 
 ## Struktura repozytorium
 
 ```
-ZRWP/
+Enterprise-Risk-Management/
 ├── prez3.ipynb              # Projekt 1: miary ryzyka, portfele FX/CFD, EVT
 ├── prez4.ipynb              # Projekt 2: VaR/EVaR, backtesting, FHS GARCH, EWMA+Hill
 ├── prez5.ipynb              # Projekt 3: optymalizacja portfela Markowitza (13 spółek GPW)
-├── prez5v1.ipynb            # Wcześniejsza wersja prez5 (portfel 2-składnikowy VOTUM/KRUK)
-├── podsumowanie.ipynb       # Integracja wyników + wykresy do raportu
-├── lstm_var_xtb.py          # LSTM + parametryczny VaR (t-Student)
-├── lstm_fhs_xtb.py          # LSTM + FHS (empiryczny kwantyl reszt) — model końcowy
-├── wig20_d.csv              # Dzienne notowania WIG20 (2021–2025)
-├── figures_raport/          # Wykresy wygenerowane do raportu (fig_01–fig_09)
-├── raport_podsumowanie.tex  # Źródło LaTeX raportu podsumowującego
-├── raport_podsumowanie.pdf  # Raport końcowy (PDF)
-├── raport_analiza_ryzyka_XTB.pdf
-└── raport_prez4.pdf
+├── prez6.ipynb              # Projekt 4: hedging FX (FEUR/FUSD), Delta, VaR strategii
+├── podsumowanie.ipynb       # Integracja wyników + wykresy raportowe
+├── lstm_fhs_xtb.py          # LSTM + FHS (empiryczny kwantyl reszt)
+├── wig20_d.csv              # Dzienne notowania WIG20 (stooq.pl, 2021–2025)
+├── requirements.txt
+├── .gitignore
+└── README.md
 ```
 
 ---
@@ -98,29 +97,32 @@ ZRWP/
 - Alokacja **1 mln PLN** w 13 akcjach GPW (PKO BP, PKN Orlen, KGHM, CD Projekt, Dino, VOTUM, KRUK, PZU, Enter Air, Develia, Dom Development, Allegro, Asseco)
 - Portfel minimalnej wariancji (MVP), portfel rynkowy (max Sharpe), efektywna granica
 - Chmura 10 000 losowych portfeli (Monte Carlo, rozkład Dirichleta)
-- Model jednoskładnikowy (SIM) z β względem WIG20
+- Model jednoskładnikowy (SIM) z β względem WIG20 (dane z `wig20_d.csv`)
 - Ograniczenie VaR 99% ≤ 20% (rocznie)
 
-### `lstm_var_xtb.py` / `lstm_fhs_xtb.py` — Hybrydowy model LSTM
+### `prez6.ipynb` — Zabezpieczenie ryzyka walutowego
 
-Oba skrypty implementują pipeline:
+- Ekspozycja netto: **50 mln EUR** i **30 mln USD** (struktura przychodów z `prez3`)
+- Instrumenty: kontrakty terminowe **FEUR** i **FUSD** na GPW (fixing NBP, clearing KDPW)
+- **Hedge ratio** minimum wariancji, liczba kontraktów, depozyt zabezpieczający i variation margin
+- Miary wrażliwości: **Delta**, P&L przy ruchu ±1%
+- **VaR 99%** (1 dzień) strategii przed i po hedżu: HS, parametryczna, t-Student + **ES**
+- Analiza kosztów rollowania, basis risk i scenariuszy stress (±3σ)
+- Uzasadnienie wykluczenia **CFD na platformie XTB** jako narzędzia hedgingu
+
+### `lstm_fhs_xtb.py` — Hybrydowy model LSTM
+
+Pipeline:
 
 ```
 VaR_α,t+1 = −σ̂_LSTM(t+1) · Q_α(z)
 ```
 
-gdzie LSTM(32) prognozuje log|zwrot| z 6 cech (log-zwroty, wolumen, EWMA, σ_close itd.), a kwantyl reszt `Q_α(z)` pochodzi z:
-
-| Plik | Kwantyl reszt |
-|------|---------------|
-| `lstm_var_xtb.py` | Parametryczny t-Student (fit na resztach walidacyjnych) |
-| `lstm_fhs_xtb.py` | Empiryczny kwantyl FHS (lepszy dla ujemnej skośności) |
-
-Cechy implementacji: rolling refit co 90 dni, grid search (WINDOW × LAMBDA_EWMA × SIGMA_FLOOR), gradient clipping, deterministyczny seed, wsparcie **Apple MPS** / CPU.
+LSTM(32) prognozuje log|zwrot| z 6 cech (log-zwroty, wolumen, EWMA, σ_close itd.), a `Q_α(z)` to empiryczny kwantyl standaryzowanych reszt FHS. Rolling refit co 90 dni, grid search (WINDOW × LAMBDA_EWMA × SIGMA_FLOOR), wsparcie **Apple MPS** / CPU.
 
 ### `podsumowanie.ipynb` — Integracja
 
-Notebook łączy wyniki wszystkich projektów, generuje wykresy w jednolitej stylistyce (paleta kolorów XTB) i stanowi źródło figur do raportu LaTeX.
+Notebook łączy wyniki projektów `prez3`–`prez5` i modelu LSTM, generuje wykresy w jednolitej stylistyce (paleta kolorów XTB).
 
 ---
 
@@ -141,14 +143,16 @@ Główne biblioteki:
 | `torch` | Sieci LSTM |
 | `arch` | Modele GARCH (prez4, podsumowanie) |
 
+Pełna lista w [`requirements.txt`](requirements.txt).
+
 ---
 
 ## Instalacja i uruchomienie
 
 ```bash
 # Klonowanie repozytorium
-git clone https://github.com/michalmarchwiak/ZRWP.git
-cd ZRWP
+git clone https://github.com/michalmarchwiak/Enterprise-Risk-Management.git
+cd Enterprise-Risk-Management
 
 # Wirtualne środowisko (zalecane)
 python -m venv .venv
@@ -167,16 +171,16 @@ pip install -r requirements.txt
 jupyter notebook podsumowanie.ipynb   # pełne podsumowanie (zalecany start)
 jupyter notebook prez4.ipynb          # VaR i backtesting
 jupyter notebook prez5.ipynb          # optymalizacja portfela
+jupyter notebook prez6.ipynb          # hedging walutowy FEUR/FUSD
 ```
 
-### Modele LSTM
+### Model LSTM
 
 ```bash
-python lstm_fhs_xtb.py    # model końcowy LSTM + FHS
-python lstm_var_xtb.py    # wariant z t-Studentem
+python lstm_fhs_xtb.py
 ```
 
-> **Uwaga:** Skrypty LSTM pobierają dane z Yahoo Finance i trenują sieć — pierwsze uruchomienie może zająć kilka minut (GPU/MPS przyspiesza trening).
+> **Uwaga:** Skrypt LSTM pobiera dane z Yahoo Finance i trenuje sieć — pierwsze uruchomienie może zająć kilka minut (GPU/MPS przyspiesza trening).
 
 ---
 
@@ -184,32 +188,21 @@ python lstm_var_xtb.py    # wariant z t-Studentem
 
 | Źródło | Zawartość | Okres |
 |--------|-----------|-------|
-| Yahoo Finance (`yfinance`) | XTB.WA, akcje GPW, kursy FX, indeksy | 2018–2025 |
-| `wig20_d.csv` (stooq.pl) | Dzienne OHLCV WIG20 | 2021–2025 |
+| Yahoo Finance (`yfinance`) | XTB.WA, akcje GPW, kursy FX (EUR/PLN, USD/PLN) | 2018–2025 |
+| `wig20_d.csv` (lokalny, [stooq.pl](https://stooq.pl)) | Dzienne OHLCV WIG20 | 2021–2025 |
+| GPW | Specyfikacja kontraktów FEUR / FUSD (fixing NBP) | — |
 
 Główny zbiór analityczny: **n = 2030** obserwacji dziennych log-zwrotów XTB.WA (2018-01-01 – 2025-12-30).
-
----
-
-## Raporty i wykresy
-
-| Plik | Opis |
-|------|------|
-| `raport_podsumowanie.pdf` | Formalne podsumowanie wszystkich projektów (LaTeX → PDF) |
-| `raport_analiza_ryzyka_XTB.pdf` | Wcześniejszy raport analityczny |
-| `raport_prez4.pdf` | Raport z projektu VaR/EVaR |
-| `figures_raport/fig_01.png` – `fig_09.png` | Wykresy do raportu (charakterystyka, K-S, VaR, backtest, EVT, LSTM, Markowitz) |
-
 
 ---
 
 ## Autor
 
 **Michał Marchwiak**  
-Semestr letni 2025/2026 — Zarządzanie Ryzykiem w Przemysle
+Semestr letni 2025/2026 — Zarządzanie Ryzykiem w Przedsiębiorstwie
 
 ---
 
 ## Licencja
 
-Projekt akademicki — kod i materiały udostępniane wyłącznie w celach edukacyjnych. Dane rynkowe pochodzą z publicznych źródeł (Yahoo Finance, GPW) i podlegają warunkom tych serwisów.
+Projekt akademicki — kod i materiały udostępniane wyłącznie w celach edukacyjnych. Dane rynkowe pochodzą z publicznych źródeł (Yahoo Finance, GPW, stooq.pl) i podlegają warunkom tych serwisów.
