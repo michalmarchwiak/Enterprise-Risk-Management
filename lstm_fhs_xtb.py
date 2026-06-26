@@ -1,29 +1,29 @@
 """
-Hybrydowy model LSTM + FHS (Filtered Historical Simulation) dla XTB.WA.
+Hybrid LSTM + FHS (Filtered Historical Simulation) model for XTB.WA.
 
-Wariant z lstm_var_xtb.py, ale zamiast parametrycznego t-Studenta uzywamy
-EMPIRYCZNEGO kwantyla standaryzowanych reszt:
+Variant of lstm_var_xtb.py, but instead of a parametric Student's t-distribution we use
+the EMPIRICAL quantile of standardized residuals:
 
     VaR_alpha,t+1 = -sigma_pred(t+1) * Q_alpha(z)
 
-gdzie:
-  - sigma_pred(t+1) — prognoza z LSTM (rolling refit co REFIT_STEP dni)
-  - z = r / sigma_pred — standaryzowane reszty na zbiorze treningowym
-    (per refit; pelny in-sample, dla stabilnej estymacji 1%-kwantyla)
-  - Q_alpha(z) — empiryczny lewy alpha-kwantyl reszt
+where:
+  - sigma_pred(t+1) — LSTM forecast (rolling refit every REFIT_STEP days)
+  - z = r / sigma_pred — standardized residuals on the training set
+    (per refit; full in-sample, for stable 1% quantile estimation)
+  - Q_alpha(z) — empirical left alpha-quantile of residuals
 
-Motywacja:
-  1. ZWROTY AKCJI MAJA NEGATYWNY SKEW. Symetryczny t (loc=0) zaniza lewy
-     ogon i moze tlumaczyc systematyczne za-male/zle-zgrupowane przekroczenia
-     w poprzednim wariancie. Empiryczny kwantyl natywnie obsluguje asymetrie.
-  2. Brak parametrycznego zalozenia — gladko radzi sobie z grubymi ogonami.
-  3. Mniej hiperparametrow do tuningu (znikaja NU_FLOOR/NU_CAP, scale_z).
+Rationale:
+  1. EQUITY RETURNS HAVE NEGATIVE SKEW. Symmetric t (loc=0) understates the left
+     tail and may explain systematic under-sized / mis-clustered violations in the
+     previous variant. The empirical quantile natively handles asymmetry.
+  2. No parametric assumption — handles fat tails smoothly.
+  3. Fewer hyperparameters to tune (NU_FLOOR/NU_CAP, scale_z are removed).
 
-Zachowane wzgledem v3 (lstm_var_xtb.py):
+Preserved relative to v3 (lstm_var_xtb.py):
   - rolling refit, target log|r_{t+1}|, L1 loss
   - gradient clipping, defensive best_state
-  - reset_seed per pipeline (deterministyczne porownanie konfiguracji)
-  - grid po WINDOW x LAMBDA_EWMA x SIGMA_FLOOR
+  - reset_seed per pipeline (deterministic configuration comparison)
+  - grid over WINDOW x LAMBDA_EWMA x SIGMA_FLOOR
 """
 
 import numpy as np
@@ -39,7 +39,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 DEVICE = 'mps' if torch.backends.mps.is_available() else 'cpu'
-print(f'Urzadzenie: {DEVICE}')
+print(f'Device: {DEVICE}')
 
 
 def reset_seed(seed=24):
@@ -54,7 +54,7 @@ def reset_seed(seed=24):
 
 reset_seed(24)
 
-# ------------------- Stale modelu -------------------
+# ------------------- Model constants -------------------
 ALPHAS      = [0.05, 0.01]
 WINDOW      = 60
 SIGMA_WIN   = 30
@@ -70,11 +70,11 @@ SIGMA_FLOOR = 0.25
 FEATURES   = ['log_ret', 'log_vol', 'sigma_cl', 'log_r2', 'ewma_sig', 'dlog_vol']
 REFIT_STEP = 90
 
-# Ile ostatnich dni reszt uzywac do empirycznego kwantyla (None = caly trening).
-# Dluzsze okno = stabilniejszy 1%-kwantyl, ale wolniej reaguje na zmiany rezimu.
+# How many recent residual days to use for the empirical quantile (None = full training).
+# Longer window = more stable 1% quantile, but slower to react to regime changes.
 RESID_WIN = None
 
-# ------------------- 1. Pobranie danych -------------------
+# ------------------- 1. Data download -------------------
 data = yf.download('XTB.WA', start='2018-01-01', end='2025-12-31',
                    progress=False, auto_adjust=False)
 if isinstance(data.columns, pd.MultiIndex):
@@ -88,7 +88,7 @@ log_ret = np.log(close / close.shift(1)).dropna().rename('log_ret')
 volume  = volume.loc[log_ret.index]
 
 
-# ------------------- 2. Inzynieria cech -------------------
+# ------------------- 2. Feature engineering -------------------
 def build_df(lambda_ewma):
     log_vol  = np.log(volume + 1.0).rename('log_vol')
     sigma_cl = log_ret.rolling(SIGMA_WIN).std().rename('sigma_cl')
@@ -133,9 +133,9 @@ def make_windows(X_flat, y_flat, w):
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
 
 
-# ------------------- 4. Architektura LSTM -------------------
+# ------------------- 4. LSTM architecture -------------------
 class LSTMVol(nn.Module):
-    """LSTM(32) -> Dropout(0.3) -> Dense(1). Predykcja log(sigma_{t+1})."""
+    """LSTM(32) -> Dropout(0.3) -> Dense(1). Predicts log(sigma_{t+1})."""
     def __init__(self, input_size=6, hidden=32, dropout=0.3):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden, batch_first=True)
@@ -148,7 +148,7 @@ class LSTMVol(nn.Module):
         return self.fc(out).squeeze(-1)
 
 
-# ------------------- 5. Trening (jeden fit) -------------------
+# ------------------- 5. Training (single fit) -------------------
 def train_one(df_tr_subset, window, verbose=False):
     sc = fit_scalers(df_tr_subset)
     X_flat = apply_scalers(df_tr_subset, sc)
@@ -199,7 +199,7 @@ def train_one(df_tr_subset, window, verbose=False):
             patience_cnt += 1
             if patience_cnt >= PATIENCE:
                 if verbose:
-                    print(f'    EarlyStopping po epoce {epoch}')
+                    print(f'    EarlyStopping at epoch {epoch}')
                 break
 
     model.load_state_dict(best_state)
@@ -228,18 +228,18 @@ def predict_train(model, sc, df_full, end_k, window):
     return np.clip(np.exp(ls), 1e-6, None)
 
 
-# ------------------- 6. Rolling refit + empiryczny kwantyl reszt -------------------
+# ------------------- 6. Rolling refit + empirical residual quantile -------------------
 def run_pipeline(window, lambda_ewma, verbose=True, seed=24):
-    """Rolling refit LSTM. Per refit zapisuje pelne standaryzowane reszty
-    z = r/sigma_LSTM (FHS), zeby kwantyle dawalo sie liczyc post-hoc dla
-    dowolnego RESID_WIN bez ponownego treningu modelu."""
+    """Rolling refit LSTM. Per refit stores full standardized residuals
+    z = r/sigma_LSTM (FHS), so quantiles can be computed post-hoc for any
+    RESID_WIN without retraining the model."""
     reset_seed(seed)
     df_loc  = build_df(lambda_ewma)
     n_train = int(TRAIN_FRAC * len(df_loc))
 
     sigma_chunks    = []
-    z_resid_blocks  = []   # pelne reszty per refit (uciecie do RESID_WIN robimy post-hoc)
-    block_lens      = []   # ile dni testowych obejmuje dany refit
+    z_resid_blocks  = []   # full residuals per refit (RESID_WIN trimming is post-hoc)
+    block_lens      = []   # how many test days each refit covers
     train_losses, val_losses = [], []
 
     cur_end  = n_train
@@ -250,7 +250,7 @@ def run_pipeline(window, lambda_ewma, verbose=True, seed=24):
         if verbose:
             print(f'  Refit #{refit_no:2d}: train -> {df_loc.index[cur_end-1].date()} '
                   f'({cur_end} obs)   |   pred {df_loc.index[cur_end].date()}..'
-                  f'{df_loc.index[block_end-1].date()} ({block_end - cur_end} dni)')
+                  f'{df_loc.index[block_end-1].date()} ({block_end - cur_end} days)')
 
         model_k, sc_k, tr_l, v_l = train_one(df_loc.iloc[:cur_end], window,
                                              verbose=False)
@@ -284,11 +284,11 @@ def run_pipeline(window, lambda_ewma, verbose=True, seed=24):
 
 
 def quantiles_for(pipe, resid_win):
-    """Liczy empiryczne kwantyle alpha post-hoc.
-    `resid_win` moze byc:
-      - None / int  -> jedno okno wspolne dla wszystkich alpha
-      - dict {alpha: window} -> osobne okno per poziom (np. krotkie dla 5%,
-        dlugie dla 1%, gdzie rzadkie obserwacje wymagaja stabilnosci)."""
+    """Computes empirical alpha quantiles post-hoc.
+    `resid_win` can be:
+      - None / int  -> single window shared for all alpha levels
+      - dict {alpha: window} -> separate window per level (e.g. short for 5%,
+        long for 1% where rare observations need stability)."""
     if not isinstance(resid_win, dict):
         resid_win = {a: resid_win for a in ALPHAS}
 
@@ -316,12 +316,12 @@ _pipeline_cache = {}
 def get_pipeline(window, lambda_ewma, verbose=False):
     key = (int(window), round(float(lambda_ewma), 4))
     if key not in _pipeline_cache:
-        print(f'\n>>> Pipeline LSTM-FHS: WINDOW={window}, LAMBDA_EWMA={lambda_ewma}')
+        print(f'\n>>> LSTM-FHS pipeline: WINDOW={window}, LAMBDA_EWMA={lambda_ewma}')
         _pipeline_cache[key] = run_pipeline(window, lambda_ewma, verbose=verbose)
     return _pipeline_cache[key]
 
 
-# ------------------- 7. Backtesty (Kupiec POF + Christoffersen) -------------------
+# ------------------- 7. Backtests (Kupiec POF + Christoffersen) -------------------
 def kupiec_pof(viol, alpha):
     x, n = int(viol.sum()), len(viol)
     if x == 0 or x == n:
@@ -333,9 +333,9 @@ def kupiec_pof(viol, alpha):
 
 
 def christoffersen_ind(viol):
-    """LR test niezaleznosci. Obsluguje przypadki brzegowe (np. n11=0 przy
-    rozproszonych naruszeniach — to wlasnie sygnatura niezaleznosci, nie
-    powod, zeby zwracac NaN). Konwencja 0*log(0)=0."""
+    """LR independence test. Handles edge cases (e.g. n11=0 with scattered violations —
+    that is the signature of independence, not a reason to return NaN).
+    Convention: 0*log(0)=0."""
     v = viol.astype(int)
     n00 = n01 = n10 = n11 = 0
     for i in range(1, len(v)):
@@ -354,7 +354,7 @@ def christoffersen_ind(viol):
     pi_  = n_viol / n_total
 
     def xlogy(x, p):
-        # 0 * log(0) = 0 (konwencja); x>0 i p=0 -> -inf (sygnal anomalii)
+        # 0 * log(0) = 0 (convention); x>0 and p=0 -> -inf (anomaly signal)
         if x == 0:
             return 0.0
         if p <= 0.0:
@@ -369,19 +369,19 @@ def christoffersen_ind(viol):
         return np.nan, np.nan
 
     lr = -2.0 * (log_l0 - log_l1)
-    lr = max(lr, 0.0)  # LR moze byc nieznacznie ujemne przez bledy numeryczne
+    lr = max(lr, 0.0)  # LR can be slightly negative due to numerical error
     return lr, 1 - chi2.cdf(lr, 1)
 
 
 def compute_var_and_tests(pipe, sigma_floor, resid_win=None):
-    """VaR_alpha = -sigma_used * Q_alpha(z), gdzie Q_alpha pochodzi z FHS.
-    `resid_win` jak w quantiles_for: skalar, None, lub dict per alpha."""
+    """VaR_alpha = -sigma_used * Q_alpha(z), where Q_alpha comes from FHS.
+    `resid_win` as in quantiles_for: scalar, None, or dict per alpha."""
     qd = quantiles_for(pipe, resid_win)
     sigma_used = np.maximum(pipe['sigma_pred_raw'], sigma_floor * pipe['ewma_te'])
     out = {'sigma': sigma_used, 'vars': {}, 'tests': {},
            'q_arr': qd['q_arr'], 'q_per_refit': qd['q_per_refit']}
     for a in ALPHAS:
-        q_a   = qd['q_arr'][a]                          # juz lewe (ujemne) kwantyle
+        q_a   = qd['q_arr'][a]                          # already left (negative) quantiles
         var_a = -(sigma_used * q_a)
         viol  = (pipe['r_actual'] < -var_a).astype(int)
         _, p_p, n_v = kupiec_pof(viol, a)
@@ -403,10 +403,10 @@ WINDOW_GRID      = [30, 50, 80]
 LAMBDA_EWMA_GRID = [0.94, 0.97]
 SIGMA_FLOOR_GRID = [0.0, 0.3, 0.5, 0.7, 0.9]
 
-# Per-alpha okno empirycznych reszt (None = caly trening).
-# Dla 5% krotsze okno tnie wplyw skrajnych obs sprzed lat -> q95 mniej skrajne
-# -> wiecej naruszen, bardziej w okolicy 5%.
-# Dla 1% potrzeba duzo punktow, zeby kwantyl byl stabilny.
+# Per-alpha empirical residual window (None = full training).
+# For 5%, a shorter window reduces the influence of extreme observations from years ago
+# -> q95 less extreme -> more violations, closer to 5%.
+# For 1%, many points are needed for a stable quantile.
 RESID_WIN_GRID = [
     # (RW95, RW99)
     (None, None),
@@ -427,12 +427,12 @@ def _to_rw(v):
 
 
 def run_grid_search(verbose_pipeline=True, verbose_grid=True):
-    """Pelny grid search + wybor najlepszej konfiguracji (jak przy uruchomieniu skryptu)."""
+    """Full grid search + best configuration selection (as when running the script)."""
     n_lstm_runs = len(WINDOW_GRID) * len(LAMBDA_EWMA_GRID)
     if verbose_grid:
-        print('\n====== Grid search FHS: WINDOW x LAMBDA_EWMA x SIGMA_FLOOR x RESID_WIN ======')
-        print(f'(LSTM trenowany dla kazdej pary (WINDOW, LAMBDA_EWMA) — {n_lstm_runs} razy. '
-              f'SIGMA_FLOOR i RESID_WIN aplikowane post-hoc.)\n')
+        print('\n====== FHS grid search: WINDOW x LAMBDA_EWMA x SIGMA_FLOOR x RESID_WIN ======')
+        print(f'(LSTM trained for each (WINDOW, LAMBDA_EWMA) pair — {n_lstm_runs} times. '
+              f'SIGMA_FLOOR and RESID_WIN applied post-hoc.)\n')
 
     grid_rows = []
     for win in WINDOW_GRID:
@@ -442,7 +442,7 @@ def run_grid_search(verbose_pipeline=True, verbose_grid=True):
             exp95 = int(round(0.05 * n_obs))
             exp99 = int(round(0.01 * n_obs))
             if verbose_grid:
-                print(f'  N test = {n_obs}, oczekiwane przekroczenia: 95%={exp95}, 99%={exp99}')
+                print(f'  N test = {n_obs}, expected violations: 95%={exp95}, 99%={exp99}')
             for sf in SIGMA_FLOOR_GRID:
                 for rw95, rw99 in RESID_WIN_GRID:
                     rw_dict = {0.05: rw95, 0.01: rw99}
@@ -466,12 +466,12 @@ def run_grid_search(verbose_pipeline=True, verbose_grid=True):
                         'fr95':    f'{fr95:.2%}',
                         'Kup95':   f'{t95["p_kup"]:.3f}' if not np.isnan(t95['p_kup']) else '-',
                         'Chr95':   f'{t95["p_chr"]:.3f}' if not np.isnan(t95['p_chr']) else '-',
-                        'OK95':    'TAK' if (t95['k_ok'] and t95['c_ok']) else 'NIE',
+                        'OK95':    'YES' if (t95['k_ok'] and t95['c_ok']) else 'NO',
                         'n99':     t99['n_viol'],
                         'fr99':    f'{fr99:.2%}',
                         'Kup99':   f'{t99["p_kup"]:.3f}' if not np.isnan(t99['p_kup']) else '-',
                         'Chr99':   f'{t99["p_chr"]:.3f}' if not np.isnan(t99['p_chr']) else '-',
-                        'OK99':    'TAK' if (t99['k_ok'] and t99['c_ok']) else 'NIE',
+                        'OK99':    'YES' if (t99['k_ok'] and t99['c_ok']) else 'NO',
                         'freq_dev': f'{freq_dev:.3f}',
                         '_score':  (
                             (0.0 if np.isnan(t95['p_kup']) else min(t95['p_kup'], 1.0))
@@ -489,23 +489,23 @@ def run_grid_search(verbose_pipeline=True, verbose_grid=True):
 
     df_show = df_grid.sort_values('_score', ascending=False).drop(columns=_aux_cols)
     if verbose_grid:
-        print('\n--- Pelna tabela (sortowana wg sumy p-wartosci, malejaco) — top 30 ---')
+        print('\n--- Full table (sorted by sum of p-values, descending) — top 30 ---')
         print(df_show.head(30).to_string(index=False))
 
-    df_pass = df_show[(df_show['OK95'] == 'TAK') & (df_show['OK99'] == 'TAK')]
+    df_pass = df_show[(df_show['OK95'] == 'YES') & (df_show['OK99'] == 'YES')]
     if verbose_grid:
-        print('\n--- Tylko konfiguracje OK95 = TAK i OK99 = TAK ---')
+        print('\n--- Configurations with OK95 = YES and OK99 = YES only ---')
         if len(df_pass) == 0:
-            print('  (brak konfiguracji przechodzacej oba testy na obu poziomach)')
+            print('  (no configuration passes both tests at both levels)')
         else:
             print(df_pass.to_string(index=False))
 
     df_freq = df_grid.sort_values('_freq_dev', ascending=True).drop(columns=_aux_cols).head(10)
     if verbose_grid:
-        print('\n--- Top 10 po freq_dev (najmniejsze odchylenie od 5%/1%) ---')
+        print('\n--- Top 10 by freq_dev (smallest deviation from 5%/1%) ---')
         print(df_freq.to_string(index=False))
 
-    df_grid['_pass_both'] = ((df_grid['OK95'] == 'TAK') & (df_grid['OK99'] == 'TAK')).astype(int)
+    df_grid['_pass_both'] = ((df_grid['OK95'] == 'YES') & (df_grid['OK99'] == 'YES')).astype(int)
     best = df_grid.sort_values(['_pass_both', '_score', '_freq_dev'],
                                ascending=[False, False, True]).iloc[0]
 
@@ -516,7 +516,7 @@ def run_grid_search(verbose_pipeline=True, verbose_grid=True):
     best_rw99 = _to_rw(best['_rw99'])
     best_rw   = {0.05: best_rw95, 0.01: best_rw99}
     if verbose_grid:
-        print(f'\nNajlepsza konfiguracja (pass_both={int(best["_pass_both"])}, '
+        print(f'\nBest configuration (pass_both={int(best["_pass_both"])}, '
               f'score = {best["_score"]:.3f}, freq_dev = {best["_freq_dev"]:.3f}): '
               f'WINDOW={best_win}, LAMBDA_EWMA={best_lam}, SIGMA_FLOOR={best_sf}, '
               f'RW95={_fmt_rw(best_rw95)}, RW99={_fmt_rw(best_rw99)}')
@@ -570,7 +570,7 @@ if __name__ == '__main__':
 
     axes[0].plot(train_losses, label='train MAE')
     axes[0].plot(val_losses,   label='val MAE')
-    axes[0].set_title(f'Krzywa uczenia (MAE) — WIN={BEST_WIN}, LAMBDA={BEST_LAM}')
+    axes[0].set_title(f'Learning curve (MAE) — WIN={BEST_WIN}, LAMBDA={BEST_LAM}')
     axes[0].legend(); axes[0].grid(alpha=0.3)
 
     axes[1].plot(dates_te, sigma_pred,     color='steelblue', lw=1,
@@ -581,7 +581,7 @@ if __name__ == '__main__':
                  label=f'EWMA sigma (lambda={BEST_LAM})')
     for k in range(n_train + REFIT_STEP, len(df_best), REFIT_STEP):
         axes[1].axvline(df_best.index[k], color='black', ls=':', lw=0.5, alpha=0.4)
-    axes[1].set_title('Prognoza zmiennosci $\\sigma_{t+1}$ (rolling refit)')
+    axes[1].set_title('Volatility forecast $\\sigma_{t+1}$ (rolling refit)')
     axes[1].legend(); axes[1].grid(alpha=0.3)
 
     axes[2].plot(dates_te, r_actual, color='steelblue', lw=0.5, alpha=0.7, label='$R_t$')
@@ -592,9 +592,9 @@ if __name__ == '__main__':
         axes[2].scatter(dates_te[viol], r_actual[viol], color=c, s=18, zorder=5)
     axes[2].set_title(f'LSTM-FHS VaR best config '
                       f'(WIN={BEST_WIN}, LAM={BEST_LAM}, SF={BEST_SF}, '
-                      f'RW95={_fmt_rw(BEST_RW95)}, RW99={_fmt_rw(BEST_RW99)}) vs zwroty')
+                      f'RW95={_fmt_rw(BEST_RW95)}, RW99={_fmt_rw(BEST_RW99)}) vs returns')
     axes[2].legend(); axes[2].grid(alpha=0.3)
 
     plt.tight_layout()
-    print('\nWykres gotowy.')
+    print('\nPlot ready.')
     plt.show()

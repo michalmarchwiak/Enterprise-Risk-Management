@@ -111,67 +111,67 @@ Key charts are extracted from `podsumowanie.ipynb` and `prez6.ipynb` (run the no
 
 Price path, daily log-returns, fitted distributions, and Q-Q plot for XTB.WA (2018–2025). Fat left tails and volatility clustering are visible throughout.
 
-![XTB.WA return series characteristics](docs/images/summary_01_xtb-wa-charakterystyka-szeregu-zwrotow-2018-2025.png)
+![XTB.WA return series characteristics](docs/images/summary_01_xtb-return-series-2018-2025.png)
 
 ### Distribution Fit (Kolmogorov–Smirnov Test)
 
 No parametric distribution adequately describes XTB.WA log-returns; Johnson SU and Student's *t* provide the closest fit.
 
-![Kolmogorov-Smirnov distribution test](docs/images/summary_02_cell8.png)
+![Kolmogorov-Smirnov distribution test](docs/images/summary_02_ks-distribution-test.png)
 
 ### VaR, ES, and EVaR Comparison
 
 Side-by-side comparison of risk measures at 95% and 99% confidence levels (full sample).
 
-![VaR ES EVaR comparison](docs/images/summary_03_porownanie-var-es-i-evar-xtb-wa-full-sample.png)
+![VaR ES EVaR comparison](docs/images/summary_03_var-es-evar-comparison.png)
 
 ### Rolling VaR 99% Backtest
 
 Three best-performing methods (FHS GARCH, EWMA + Hill, LSTM-FHS) vs. actual returns. Rolling window W = 500 days.
 
-![Rolling VaR 99% backtest](docs/images/summary_04_cell15.png)
+![Rolling VaR 99% backtest](docs/images/summary_04_rolling-var99-backtest.png)
 
 ### Basel Traffic Light
 
 Annual VaR 99% breach counts by method, color-coded by Basel zone (green / yellow / red).
 
-![Basel Traffic Light heatmap](docs/images/summary_05_cell16.png)
+![Basel Traffic Light heatmap](docs/images/summary_05_basel-traffic-light.png)
 
 ### Extreme Value Theory (EVT)
 
 Block Maxima → GEV, Peaks Over Threshold → GPD, and mean excess plot for tail modeling.
 
-![Extreme Value Theory for XTB.WA](docs/images/summary_06_teoria-wartosci-ekstremalnych-dla-xtb-wa.png)
+![Extreme Value Theory for XTB.WA](docs/images/summary_06_extreme-value-theory.png)
 
 ### LSTM-FHS Dynamic VaR
 
 Rolling volatility forecast (σ_{t+1}) and dynamic VaR vs. out-of-sample log-returns.
 
-![LSTM-FHS dynamic VaR](docs/images/summary_07_cell23.png)
+![LSTM-FHS dynamic VaR](docs/images/summary_07_lstm-fhs-dynamic-var.png)
 
 ### Markowitz Efficient Frontier (13 GPW Stocks)
 
 Efficient frontier for a 1M PLN allocation across 13 Warsaw-listed equities.
 
-![Markowitz efficient frontier](docs/images/summary_08_cell27.png)
+![Markowitz efficient frontier](docs/images/summary_08_markowitz-efficient-frontier.png)
 
 ### Portfolio Allocation: MVP vs. Market Portfolio
 
 Capital weights for the minimum-variance portfolio (MVP) and maximum-Sharpe market portfolio.
 
-![MVP vs market portfolio allocation](docs/images/summary_09_cell28.png)
+![MVP vs market portfolio allocation](docs/images/summary_09_mvp-vs-market-allocation.png)
 
 ### FX Hedging Strategy (EUR/PLN + USD/PLN)
 
 Cumulative P&L, daily loss distribution, rolling VaR, and cross-currency correlation before and after hedging with FEUR/FUSD futures.
 
-![FX hedging P&L and VaR analysis](docs/images/hedge_02_strategia-hedgingu-eur-pln-usd-pln-analiza-p-l-i-v.png)
+![FX hedging P&L and VaR analysis](docs/images/hedge_02_fx-hedging-pnl-var.png)
 
 ### Hedging Cost vs. Unhedged Losses
 
 Annual hedging costs compared to potential FX losses without protection.
 
-![Hedging cost vs unhedged losses](docs/images/hedge_03_roczne-koszty-hed-u-vs-straty-bez-zabezpieczenia.png)
+![Hedging cost vs unhedged losses](docs/images/hedge_03_hedging-cost-vs-losses.png)
 
 ---
 
