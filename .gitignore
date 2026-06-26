@@ -21,7 +21,7 @@ wheels/
 *.egg
 MANIFEST
 
-# Wirtualne środowiska
+# Virtual environments
 .venv/
 venv/
 ENV/
@@ -41,7 +41,7 @@ checkpoints/
 .LSOverride
 ._*
 
-# IDE / edytory
+# IDE / editors
 .idea/
 *.swp
 *.swo
@@ -50,10 +50,10 @@ checkpoints/
 !.vscode/settings.json
 !.vscode/extensions.json
 
-# Cursor / Claude (lokalne metadane agentów)
+# Cursor / Claude (local agent metadata)
 .claude/
 
-# LaTeX (artefakty kompilacji)
+# LaTeX (build artifacts)
 *.aux
 *.bbl
 *.blg
@@ -65,12 +65,12 @@ checkpoints/
 *.toc
 texput.log
 
-# Sekrety i konfiguracja lokalna
+# Secrets and local configuration
 .env
 .env.*
 *.pem
 secrets.json
 
-# Duże / tymczasowe pliki wygenerowane lokalnie
+# Large / temporary locally generated files
 *.tmp
 *.bak

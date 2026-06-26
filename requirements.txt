@@ -1,29 +1,29 @@
-# Analiza ryzyka XTB — ZRWP
+# XTB risk analysis — Enterprise Risk Management
 # Python 3.10+
 
-# Obliczenia i dane
+# Computation and data
 numpy>=1.24
 pandas>=2.0
 scipy>=1.10
 scikit-learn>=1.3
 
-# Dane rynkowe
+# Market data
 yfinance>=0.2.40
 
-# Wizualizacja
+# Visualization
 matplotlib>=3.7
 
-# Modele GARCH i szeregi czasowe
+# GARCH models and time series
 arch>=6.0
 statsmodels>=0.14
 
 # Deep learning (LSTM)
 torch>=2.0
 
-# Notebooki
+# Notebooks
 jupyter>=1.0
 ipykernel>=6.0
 ipython>=8.0
 
-# Opcjonalnie (basf.ipynb — ceny metali)
+# Optional (basf.ipynb — metal prices)
 requests>=2.28
