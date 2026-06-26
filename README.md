@@ -108,7 +108,6 @@ Enterprise-Risk-Management/
 - Miary wrażliwości: **Delta**, P&L przy ruchu ±1%
 - **VaR 99%** (1 dzień) strategii przed i po hedżu: HS, parametryczna, t-Student + **ES**
 - Analiza kosztów rollowania, basis risk i scenariuszy stress (±3σ)
-- Uzasadnienie wykluczenia **CFD na platformie XTB** jako narzędzia hedgingu
 
 ### `lstm_fhs_xtb.py` — Hybrydowy model LSTM
 
