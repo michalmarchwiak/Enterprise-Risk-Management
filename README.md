@@ -1,72 +1,192 @@
-# Analiza ryzyka akcji XTB S.A.
+# XTB S.A. Equity Risk Analysis
 
-Projekt z przedmiotu **Zarządzanie Ryzykiem w Przedsiębiorstwie** — kompleksowa analiza ryzyka spółki **XTB S.A.** (`XTB.WA`) notowanej na GPW w okresie **2018–2025**.
+A comprehensive risk analysis of **XTB S.A.** (`XTB.WA`) listed on the Warsaw Stock Exchange (GPW), covering the period **2018–2025**. Developed for the course **Enterprise Risk Management** (*Zarządzanie Ryzykiem w Przedsiębiorstwie*).
 
-Repozytorium obejmuje pięć etapów pracy projektowej (notebooki `prez3`–`prez6`), hybrydowy model **LSTM + FHS**, optymalizację portfela akcji GPW, strategię zabezpieczenia ryzyka walutowego oraz podsumowanie wyników w `podsumowanie.ipynb`.
-
----
-
-## Spis treści
-
-- [Kontekst i cel](#kontekst-i-cel)
-- [Główne wnioski](#główne-wnioski)
-- [Struktura repozytorium](#struktura-repozytorium)
-- [Metody i zakres analizy](#metody-i-zakres-analizy)
-- [Wymagania](#wymagania)
-- [Instalacja i uruchomienie](#instalacja-i-uruchomienie)
-- [Dane](#dane)
-- [Autor](#autor)
+The repository spans five project stages (`prez3`–`prez6`), a hybrid **LSTM + FHS** model, GPW portfolio optimization, FX hedging with GPW futures, and an integrated summary in `podsumowanie.ipynb`.
 
 ---
 
-## Kontekst i cel
+## Table of Contents
 
-XTB S.A. to globalny broker instrumentów finansowych, którego akcje w badanym okresie przeszły transformację od mniejszego emitenta do składnika indeksu **WIG20**. Wzrost zmienności (roczne σ ≈ 47% vs. ≈ 22% dla WIG20), ujemna skośność (−0,47) i wysoka kurtoza (excess ≈ 25) wymuszają stosowanie metod dynamicznych uwzględniających **klastrowanie zmienności** i **grube ogony** rozkładu zwrotów.
-
-Celem projektu jest:
-
-1. Charakterystyka ryzyka XTB.WA i powiązanych zmiennych (FX, CFD).
-2. Porównanie metod **VaR**, **ES** i **EVaR** z backtestingiem regulacyjnym.
-3. Modelowanie ekstremów (**EVT**: GEV, GPD).
-4. Optymalizacja portfela akcji GPW (**Markowitz**, model jednoskładnikowy).
-5. Hybrydowy model **LSTM + Filtered Historical Simulation (FHS)** prognozujący dynamiczny VaR.
-6. Zabezpieczenie ekspozycji walutowej **EUR/PLN** i **USD/PLN** kontraktami terminowymi **FEUR** i **FUSD** na GPW.
-
----
-
-## Główne wnioski
-
-| Obszar | Wynik |
-|--------|-------|
-| Rozkład zwrotów | Żaden rozkład parametryczny nie przechodzi testu K-S; najlepsze dopasowanie: Johnson SU, t-Student |
-| VaR statyczny | Normalny **niedoszacowuje** VaR 99% o ~20% względem metod t i HS |
-| Backtesting (rolling, W=500) | **FHS GARCH** i **EWMA + Hill** przechodzą testy Kupieca i Christoffersena; Param Normal generuje nadmierne naruszenia (strefa czerwona Basel) |
-| EVT | GPD (POT) lepiej estymuje skrajne kwantyle (99,9%) niż Block Maxima (GEV) |
-| LSTM-FHS | Najlepsza kalibracja w testach Kupieca/Christoffersena (p ≈ 1,0 na poziomach 95% i 99%) |
-| Portfel GPW | MVP (Sharpe ≈ 0,79) vs. portfel rynkowy (Sharpe ≈ 1,26); dywersyfikacja 13 spółek >> portfel 2-składnikowy |
-| Hedging FX | Kontrakty GPW redukują VaR 99% (1 dzień) z ~4,0 mln PLN do ~0,014 mln PLN; CFD na platformie XTB **nie stanowi hedżu** (net zero w grupie) |
-
-**Rekomendowany stack ryzyka dla XTB:**
-
-- Raportowanie dzienne → **FHS GARCH**
-- Wymóg kapitałowy (IMA) → **LSTM-FHS** / **EWMA + Hill**
-- Stress test (Filar II) → **GPD / POT**
-- Alokacja strategiczna → **Markowitz + SIM**
-- Ekspozycja walutowa → **FEUR / FUSD na GPW** (KDPW, fixing NBP)
+- [Context and Objectives](#context-and-objectives)
+- [Key Findings](#key-findings)
+- [Project Workflow](#project-workflow)
+- [Visual Summary](#visual-summary)
+- [Repository Structure](#repository-structure)
+- [Methods and Scope](#methods-and-scope)
+- [Requirements](#requirements)
+- [Installation and Usage](#installation-and-usage)
+- [Data Sources](#data-sources)
+- [Author](#author)
 
 ---
 
-## Struktura repozytorium
+## Context and Objectives
+
+XTB S.A. is a global financial broker whose shares evolved from a smaller issuer to a **WIG20** constituent during the study period. Elevated volatility (annual σ ≈ 47% vs. ≈ 22% for WIG20), negative skewness (−0.47), and high excess kurtosis (≈ 25) call for dynamic methods that capture **volatility clustering** and **fat tails** in return distributions.
+
+**Project goals:**
+
+1. Characterize risk in XTB.WA and related variables (FX, CFD).
+2. Compare **VaR**, **ES**, and **EVaR** with regulatory backtesting.
+3. Model extremes using **EVT** (GEV, GPD).
+4. Optimize a GPW equity portfolio (**Markowitz**, single-index model).
+5. Build a hybrid **LSTM + Filtered Historical Simulation (FHS)** model for dynamic VaR.
+6. Hedge **EUR/PLN** and **USD/PLN** exposure with **FEUR** and **FUSD** futures on GPW.
+
+---
+
+## Key Findings
+
+| Area | Result |
+|------|--------|
+| Return distribution | No parametric distribution passes the K-S test; best fit: Johnson SU, Student's *t* |
+| Static VaR | Normal VaR **understates** 99% VaR by ~20% vs. *t*-distribution and historical simulation |
+| Backtesting (rolling, W=500) | **FHS GARCH** and **EWMA + Hill** pass Kupiec and Christoffersen tests; Parametric Normal triggers excessive breaches (Basel red zone) |
+| EVT | GPD (POT) estimates extreme quantiles (99.9%) better than Block Maxima (GEV) |
+| LSTM-FHS | Best calibration in Kupiec/Christoffersen tests (p ≈ 1.0 at 95% and 99%) |
+| GPW portfolio | MVP (Sharpe ≈ 0.79) vs. market portfolio (Sharpe ≈ 1.26); 13-stock diversification >> 2-asset portfolio |
+| FX hedging | GPW futures reduce 1-day 99% VaR from ~4.0M PLN to ~0.014M PLN; XTB platform CFDs **do not hedge** group exposure (net zero) |
+
+**Recommended risk stack for XTB:**
+
+| Use case | Method |
+|----------|--------|
+| Daily reporting | **FHS GARCH** |
+| Capital requirement (IMA) | **LSTM-FHS** / **EWMA + Hill** |
+| Stress testing (Pillar II) | **GPD / POT** |
+| Strategic allocation | **Markowitz + SIM** |
+| FX exposure | **FEUR / FUSD on GPW** (KDPW clearing, NBP fixing) |
+
+---
+
+## Project Workflow
+
+```mermaid
+flowchart LR
+    subgraph P1["prez3 — Classical Risk & EVT"]
+        A1[FX / CFD portfolios]
+        A2[VaR & EVT]
+    end
+    subgraph P2["prez4 — VaR Backtesting"]
+        B1[7 VaR methods]
+        B2[Basel Traffic Light]
+    end
+    subgraph P3["prez5 — Portfolio Optimization"]
+        C1[Markowitz MVP]
+        C2[SIM vs WIG20]
+    end
+    subgraph P4["prez6 — FX Hedging"]
+        D1[FEUR / FUSD]
+        D2[Delta & VaR]
+    end
+    subgraph ML["lstm_fhs_xtb.py"]
+        E1[LSTM volatility forecast]
+        E2[FHS empirical quantile]
+    end
+    P1 --> P2 --> P3
+    P2 --> ML
+    P1 --> P4
+    P2 --> SUM[podsumowanie.ipynb]
+    P3 --> SUM
+    ML --> SUM
+    P4 --> SUM
+```
+
+**LSTM-FHS pipeline:**
+
+```
+VaR_α,t+1 = −σ̂_LSTM(t+1) · Q_α(z)
+```
+
+An LSTM(32) network forecasts log|return| from 6 features (log-returns, volume, EWMA, σ_close, etc.), while `Q_α(z)` is the empirical quantile of standardized FHS residuals. Rolling refit every 90 days with grid search over (WINDOW × LAMBDA_EWMA × SIGMA_FLOOR). Supports **Apple MPS** / CPU.
+
+---
+
+## Visual Summary
+
+Key charts are extracted from `podsumowanie.ipynb` and `prez6.ipynb` (run the notebooks to regenerate them).
+
+### Return Series Characteristics
+
+Price path, daily log-returns, fitted distributions, and Q-Q plot for XTB.WA (2018–2025). Fat left tails and volatility clustering are visible throughout.
+
+![XTB.WA return series characteristics](docs/images/summary_01_xtb-wa-charakterystyka-szeregu-zwrotow-2018-2025.png)
+
+### Distribution Fit (Kolmogorov–Smirnov Test)
+
+No parametric distribution adequately describes XTB.WA log-returns; Johnson SU and Student's *t* provide the closest fit.
+
+![Kolmogorov-Smirnov distribution test](docs/images/summary_02_cell8.png)
+
+### VaR, ES, and EVaR Comparison
+
+Side-by-side comparison of risk measures at 95% and 99% confidence levels (full sample).
+
+![VaR ES EVaR comparison](docs/images/summary_03_porownanie-var-es-i-evar-xtb-wa-full-sample.png)
+
+### Rolling VaR 99% Backtest
+
+Three best-performing methods (FHS GARCH, EWMA + Hill, LSTM-FHS) vs. actual returns. Rolling window W = 500 days.
+
+![Rolling VaR 99% backtest](docs/images/summary_04_cell15.png)
+
+### Basel Traffic Light
+
+Annual VaR 99% breach counts by method, color-coded by Basel zone (green / yellow / red).
+
+![Basel Traffic Light heatmap](docs/images/summary_05_cell16.png)
+
+### Extreme Value Theory (EVT)
+
+Block Maxima → GEV, Peaks Over Threshold → GPD, and mean excess plot for tail modeling.
+
+![Extreme Value Theory for XTB.WA](docs/images/summary_06_teoria-wartosci-ekstremalnych-dla-xtb-wa.png)
+
+### LSTM-FHS Dynamic VaR
+
+Rolling volatility forecast (σ_{t+1}) and dynamic VaR vs. out-of-sample log-returns.
+
+![LSTM-FHS dynamic VaR](docs/images/summary_07_cell23.png)
+
+### Markowitz Efficient Frontier (13 GPW Stocks)
+
+Efficient frontier for a 1M PLN allocation across 13 Warsaw-listed equities.
+
+![Markowitz efficient frontier](docs/images/summary_08_cell27.png)
+
+### Portfolio Allocation: MVP vs. Market Portfolio
+
+Capital weights for the minimum-variance portfolio (MVP) and maximum-Sharpe market portfolio.
+
+![MVP vs market portfolio allocation](docs/images/summary_09_cell28.png)
+
+### FX Hedging Strategy (EUR/PLN + USD/PLN)
+
+Cumulative P&L, daily loss distribution, rolling VaR, and cross-currency correlation before and after hedging with FEUR/FUSD futures.
+
+![FX hedging P&L and VaR analysis](docs/images/hedge_02_strategia-hedgingu-eur-pln-usd-pln-analiza-p-l-i-v.png)
+
+### Hedging Cost vs. Unhedged Losses
+
+Annual hedging costs compared to potential FX losses without protection.
+
+![Hedging cost vs unhedged losses](docs/images/hedge_03_roczne-koszty-hed-u-vs-straty-bez-zabezpieczenia.png)
+
+---
+
+## Repository Structure
 
 ```
 Enterprise-Risk-Management/
-├── prez3.ipynb              # Projekt 1: miary ryzyka, portfele FX/CFD, EVT
-├── prez4.ipynb              # Projekt 2: VaR/EVaR, backtesting, FHS GARCH, EWMA+Hill
-├── prez5.ipynb              # Projekt 3: optymalizacja portfela Markowitza (13 spółek GPW)
-├── prez6.ipynb              # Projekt 4: hedging FX (FEUR/FUSD), Delta, VaR strategii
-├── podsumowanie.ipynb       # Integracja wyników + wykresy raportowe
-├── lstm_fhs_xtb.py          # LSTM + FHS (empiryczny kwantyl reszt)
-├── wig20_d.csv              # Dzienne notowania WIG20 (stooq.pl, 2021–2025)
+├── prez3.ipynb              # Project 1: risk measures, FX/CFD portfolios, EVT
+├── prez4.ipynb              # Project 2: VaR/EVaR, backtesting, FHS GARCH, EWMA+Hill
+├── prez5.ipynb              # Project 3: Markowitz portfolio optimization (13 GPW stocks)
+├── prez6.ipynb              # Project 4: FX hedging (FEUR/FUSD), Delta, strategy VaR
+├── podsumowanie.ipynb       # Integrated results + report-style charts
+├── lstm_fhs_xtb.py          # LSTM + FHS (empirical residual quantile)
+├── wig20_d.csv              # Daily WIG20 quotes (stooq.pl, 2021–2025)
+├── docs/images/             # Key figures referenced in this README
 ├── requirements.txt
 ├── .gitignore
 └── README.md
@@ -74,134 +194,126 @@ Enterprise-Risk-Management/
 
 ---
 
-## Metody i zakres analizy
+## Methods and Scope
 
-### `prez3.ipynb` — Klasyczne miary ryzyka i EVT
+### `prez3.ipynb` — Classical Risk Measures and EVT
 
-- **Zmienne:** EUR/PLN, USD/PLN, GBP/PLN, XTB.WA
-- Miary zmienności (σ, wariancja, IQR, MAD), kwantyle VaR (empiryczny i parametryczny)
-- Portfel walutowy (50/30/20) i portfel CFD (złoto, S&P 500, NASDAQ-100)
-- **EVT:** Block Maxima (GEV) i Peaks Over Threshold (GPD)
-- Backtesting: testy Kupieca i Christoffersena
+- **Variables:** EUR/PLN, USD/PLN, GBP/PLN, XTB.WA
+- Volatility measures (σ, variance, IQR, MAD), VaR quantiles (empirical and parametric)
+- FX portfolio (50/30/20) and CFD portfolio (gold, S&P 500, NASDAQ-100)
+- **EVT:** Block Maxima (GEV) and Peaks Over Threshold (GPD)
+- Backtesting: Kupiec and Christoffersen tests
 
-### `prez4.ipynb` — VaR, EVaR i backtesting regulacyjny
+### `prez4.ipynb` — VaR, EVaR, and Regulatory Backtesting
 
-- **7 metod VaR:** Param Normal, Param t, HS zwykła, HS ważona (BRW), FHS GARCH, EWMA + Hill, MC t / ARMA-GARCH
-- **EVaR** i **Expected Shortfall (ES)**
-- Backtesting rolling window (W = 500 dni, okres 2020–2025)
-- Testy: **Kupiec**, **Christoffersen**, **Berkowitz**, **Basel Traffic Light**
-- Bootstrapowe przedziały ufności dla VaR
+- **7 VaR methods:** Parametric Normal, Parametric *t*, plain HS, weighted HS (BRW), FHS GARCH, EWMA + Hill, MC *t* / ARMA-GARCH
+- **EVaR** and **Expected Shortfall (ES)**
+- Rolling backtest (W = 500 days, period 2020–2025)
+- Tests: **Kupiec**, **Christoffersen**, **Berkowitz**, **Basel Traffic Light**
+- Bootstrap confidence intervals for VaR
 
-### `prez5.ipynb` — Optymalizacja portfela Markowitza
+### `prez5.ipynb` — Markowitz Portfolio Optimization
 
-- Alokacja **1 mln PLN** w 13 akcjach GPW (PKO BP, PKN Orlen, KGHM, CD Projekt, Dino, VOTUM, KRUK, PZU, Enter Air, Develia, Dom Development, Allegro, Asseco)
-- Portfel minimalnej wariancji (MVP), portfel rynkowy (max Sharpe), efektywna granica
-- Chmura 10 000 losowych portfeli (Monte Carlo, rozkład Dirichleta)
-- Model jednoskładnikowy (SIM) z β względem WIG20 (dane z `wig20_d.csv`)
-- Ograniczenie VaR 99% ≤ 20% (rocznie)
+- **1M PLN** allocation across 13 GPW stocks (PKO BP, PKN Orlen, KGHM, CD Projekt, Dino, VOTUM, KRUK, PZU, Enter Air, Develia, Dom Development, Allegro, Asseco)
+- Minimum-variance portfolio (MVP), market portfolio (max Sharpe), efficient frontier
+- Monte Carlo cloud of 10,000 random portfolios (Dirichlet distribution)
+- Single-index model (SIM) with β vs. WIG20 (data from `wig20_d.csv`)
+- Constraint: annual 99% VaR ≤ 20%
 
-### `prez6.ipynb` — Zabezpieczenie ryzyka walutowego
+### `prez6.ipynb` — FX Risk Hedging
 
-- Ekspozycja netto: **50 mln EUR** i **30 mln USD** (struktura przychodów z `prez3`)
-- Instrumenty: kontrakty terminowe **FEUR** i **FUSD** na GPW (fixing NBP, clearing KDPW)
-- **Hedge ratio** minimum wariancji, liczba kontraktów, depozyt zabezpieczający i variation margin
-- Miary wrażliwości: **Delta**, P&L przy ruchu ±1%
-- **VaR 99%** (1 dzień) strategii przed i po hedżu: HS, parametryczna, t-Student + **ES**
-- Analiza kosztów rollowania, basis risk i scenariuszy stress (±3σ)
+- Net exposure: **50M EUR** and **30M USD** (revenue structure from `prez3`)
+- Instruments: **FEUR** and **FUSD** futures on GPW (NBP fixing, KDPW clearing)
+- Minimum-variance hedge ratio, contract count, initial margin and variation margin
+- Sensitivity: **Delta**, P&L under ±1% moves
+- **1-day 99% VaR** before and after hedge: HS, parametric, Student's *t* + **ES**
+- Roll costs, basis risk, and stress scenarios (±3σ)
 
-### `lstm_fhs_xtb.py` — Hybrydowy model LSTM
+### `lstm_fhs_xtb.py` — Hybrid LSTM Model
 
-Pipeline:
+Standalone script implementing the LSTM + FHS pipeline described above. Downloads data from Yahoo Finance, trains the network, and runs Kupiec/Christoffersen backtests.
 
-```
-VaR_α,t+1 = −σ̂_LSTM(t+1) · Q_α(z)
-```
+### `podsumowanie.ipynb` — Integration
 
-LSTM(32) prognozuje log|zwrot| z 6 cech (log-zwroty, wolumen, EWMA, σ_close itd.), a `Q_α(z)` to empiryczny kwantyl standaryzowanych reszt FHS. Rolling refit co 90 dni, grid search (WINDOW × LAMBDA_EWMA × SIGMA_FLOOR), wsparcie **Apple MPS** / CPU.
-
-### `podsumowanie.ipynb` — Integracja
-
-Notebook łączy wyniki projektów `prez3`–`prez5` i modelu LSTM, generuje wykresy w jednolitej stylistyce (paleta kolorów XTB).
+Combines results from `prez3`–`prez5` and the LSTM model into a unified dark-theme report with consistent XTB branding.
 
 ---
 
-## Wymagania
+## Requirements
 
 - Python **3.10+**
 - Jupyter Notebook / JupyterLab
 
-Główne biblioteki:
+| Package | Purpose |
+|---------|---------|
+| `numpy`, `pandas` | Computation, time series |
+| `yfinance` | GPW / Yahoo Finance data |
+| `matplotlib` | Visualization |
+| `scipy` | Statistics, optimization, distributions |
+| `scikit-learn` | Feature scaling (LSTM) |
+| `torch` | LSTM networks |
+| `arch` | GARCH models (`prez4`, `podsumowanie`) |
 
-| Pakiet | Zastosowanie |
-|--------|--------------|
-| `numpy`, `pandas` | Obliczenia, szeregi czasowe |
-| `yfinance` | Pobieranie danych GPW/Yahoo Finance |
-| `matplotlib` | Wizualizacja |
-| `scipy` | Statystyka, optymalizacja, rozkłady |
-| `scikit-learn` | Skalowanie cech (LSTM) |
-| `torch` | Sieci LSTM |
-| `arch` | Modele GARCH (prez4, podsumowanie) |
-
-Pełna lista w [`requirements.txt`](requirements.txt).
+Full list in [`requirements.txt`](requirements.txt).
 
 ---
 
-## Instalacja i uruchomienie
+## Installation and Usage
 
 ```bash
-# Klonowanie repozytorium
+# Clone the repository
 git clone https://github.com/michalmarchwiak/Enterprise-Risk-Management.git
 cd Enterprise-Risk-Management
 
-# Wirtualne środowisko (zalecane)
+# Virtual environment (recommended)
 python -m venv .venv
 source .venv/bin/activate        # Linux / macOS
 # .venv\Scripts\activate         # Windows
 
-# Instalacja zależności
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-> **PyTorch:** na macOS z Apple Silicon pakiet `torch` z PyPI zwykle wykrywa MPS automatycznie. W razie problemów z instalacją sprawdź [pytorch.org](https://pytorch.org/get-started/locally/).
+> **PyTorch:** On macOS with Apple Silicon, the PyPI `torch` package usually detects MPS automatically. For installation issues, see [pytorch.org](https://pytorch.org/get-started/locally/).
 
-### Notebooki
+### Notebooks
 
 ```bash
-jupyter notebook podsumowanie.ipynb   # pełne podsumowanie (zalecany start)
-jupyter notebook prez4.ipynb          # VaR i backtesting
-jupyter notebook prez5.ipynb          # optymalizacja portfela
-jupyter notebook prez6.ipynb          # hedging walutowy FEUR/FUSD
+jupyter notebook podsumowanie.ipynb   # full summary (recommended starting point)
+jupyter notebook prez4.ipynb          # VaR and backtesting
+jupyter notebook prez5.ipynb          # portfolio optimization
+jupyter notebook prez6.ipynb          # FX hedging with FEUR/FUSD
 ```
 
-### Model LSTM
+### LSTM Model
 
 ```bash
 python lstm_fhs_xtb.py
 ```
 
-> **Uwaga:** Skrypt LSTM pobiera dane z Yahoo Finance i trenuje sieć — pierwsze uruchomienie może zająć kilka minut (GPU/MPS przyspiesza trening).
+> **Note:** The LSTM script downloads data from Yahoo Finance and trains the network. The first run may take several minutes (GPU/MPS accelerates training).
 
 ---
 
-## Dane
+## Data Sources
 
-| Źródło | Zawartość | Okres |
-|--------|-----------|-------|
-| Yahoo Finance (`yfinance`) | XTB.WA, akcje GPW, kursy FX (EUR/PLN, USD/PLN) | 2018–2025 |
-| `wig20_d.csv` (lokalny, [stooq.pl](https://stooq.pl)) | Dzienne OHLCV WIG20 | 2021–2025 |
-| GPW | Specyfikacja kontraktów FEUR / FUSD (fixing NBP) | — |
+| Source | Content | Period |
+|--------|---------|--------|
+| Yahoo Finance (`yfinance`) | XTB.WA, GPW stocks, FX rates (EUR/PLN, USD/PLN) | 2018–2025 |
+| `wig20_d.csv` (local, [stooq.pl](https://stooq.pl)) | Daily WIG20 OHLCV | 2021–2025 |
+| GPW | FEUR / FUSD futures specification (NBP fixing) | — |
 
-Główny zbiór analityczny: **n = 2030** obserwacji dziennych log-zwrotów XTB.WA (2018-01-01 – 2025-12-30).
+Main analytical sample: **n = 2030** daily log-return observations for XTB.WA (2018-01-01 – 2025-12-30).
 
 ---
 
-## Autor
+## Author
 
 **Michał Marchwiak**  
-Semestr letni 2025/2026 — Zarządzanie Ryzykiem w Przedsiębiorstwie
+Summer semester 2025/2026 — Enterprise Risk Management
 
 ---
 
-## Licencja
+## License
 
-Projekt akademicki — kod i materiały udostępniane wyłącznie w celach edukacyjnych. Dane rynkowe pochodzą z publicznych źródeł (Yahoo Finance, GPW, stooq.pl) i podlegają warunkom tych serwisów.
+Academic project — code and materials are shared for educational purposes only. Market data comes from public sources (Yahoo Finance, GPW, stooq.pl) and is subject to those services' terms of use.
